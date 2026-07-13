@@ -47,6 +47,12 @@
   .cfg{font-size:12px; color:var(--muted); margin-bottom:16px;}
   .cfg input{width:100%; margin-top:4px; padding:8px; border-radius:6px; border:1px solid var(--line); background:var(--surface-2); color:var(--text);}
   .cfg button{margin-top:6px; padding:8px 12px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--text); cursor:pointer;}
+  .mes-chip{
+    display:flex; align-items:center; gap:6px; padding:7px 12px; border-radius:20px;
+    border:1px solid var(--line); background:var(--surface-2); font-size:13px; cursor:pointer; user-select:none;
+  }
+  .mes-chip.activo{border-color:var(--accent); background:rgba(63,167,150,.15); color:var(--accent);}
+  .mes-chip input{margin:0;}
 </style>
 </head>
 <body>
@@ -61,6 +67,10 @@
   </div>
 
   <div class="placas" id="placas"></div>
+  <div class="card" id="filtroCard" style="display:none">
+    <h2>Filtrar por mes</h2>
+    <div id="filtroMeses" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+  </div>
   <div id="contenido"><div class="loading">Cargando…</div></div>
 </div>
 
@@ -68,6 +78,7 @@
 let API_URL = localStorage.getItem('tp_api_url_dash') || '';
 const PLACAS = ['PWK971', 'PWK970', 'PWL000'];
 let placaActual = null;
+let periodosSeleccionados = null; // null = mes actual (default); 'todos'; o array de claves 'YYYY-M'
 
 // ?placa=PWK971 en la URL = link privado de un solo vehículo (sin pestañas para cambiar).
 // Sin parámetro = vista con las 3 pestañas (pensada solo para uso tuyo, no para repartir).
@@ -114,12 +125,79 @@ function cargarVehiculos(){
 
 async function seleccionarPlaca(p){
   placaActual = p;
+  periodosSeleccionados = null;
   document.querySelectorAll('.placa-tab').forEach(t => t.classList.toggle('activa', t.id === 'tab-' + p));
   document.getElementById('contenido').innerHTML = '<div class="loading">Cargando ' + p + '…</div>';
+  document.getElementById('filtroCard').style.display = 'block';
+  await Promise.all([cargarPeriodos(), cargarYRenderizar()]);
+}
+
+function periodosQueryParam(){
+  if (periodosSeleccionados === null) return '';
+  if (periodosSeleccionados === 'todos') return '&periodos=todos';
+  if (Array.isArray(periodosSeleccionados) && periodosSeleccionados.length) return '&periodos=' + periodosSeleccionados.join(',');
+  return '';
+}
+
+async function cargarPeriodos(){
+  const box = document.getElementById('filtroMeses');
+  box.innerHTML = '<span style="color:var(--muted); font-size:13px;">Cargando meses…</span>';
+  const r = await fetch(API_URL + '?action=getPeriodos&placa=' + placaActual);
+  const data = await r.json();
+  const periodos = data.periodos || [];
+
+  box.innerHTML = '';
+
+  const chipTodos = document.createElement('label');
+  chipTodos.className = 'mes-chip' + (periodosSeleccionados === 'todos' ? ' activo' : '');
+  chipTodos.innerHTML = '<input type="checkbox" data-clave="todos"> Todos';
+  box.appendChild(chipTodos);
+
+  periodos.forEach(p => {
+    const chip = document.createElement('label');
+    const marcado = Array.isArray(periodosSeleccionados) && periodosSeleccionados.includes(p.clave);
+    chip.className = 'mes-chip' + (marcado ? ' activo' : '');
+    chip.innerHTML = '<input type="checkbox" data-clave="' + p.clave + '"> ' + p.etiqueta;
+    box.appendChild(chip);
+  });
+
+  box.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', onFiltroMesChange);
+  });
+}
+
+function onFiltroMesChange(e){
+  const clave = e.target.dataset.clave;
+  const box = document.getElementById('filtroMeses');
+
+  if (clave === 'todos'){
+    if (e.target.checked){
+      periodosSeleccionados = 'todos';
+      box.querySelectorAll('input[type=checkbox]').forEach(cb => { if (cb.dataset.clave !== 'todos') cb.checked = false; });
+    } else {
+      periodosSeleccionados = null;
+    }
+  } else {
+    box.querySelector('input[data-clave="todos"]').checked = false;
+    const marcados = Array.from(box.querySelectorAll('input[type=checkbox]'))
+      .filter(cb => cb.checked && cb.dataset.clave !== 'todos')
+      .map(cb => cb.dataset.clave);
+    periodosSeleccionados = marcados.length ? marcados : null;
+  }
+
+  box.querySelectorAll('label.mes-chip').forEach(l => {
+    const cb = l.querySelector('input');
+    l.classList.toggle('activo', cb.checked);
+  });
+
+  cargarYRenderizar();
+}
+
+async function cargarYRenderizar(){
   try{
     const [rResumen, rAlertas] = await Promise.all([
-      fetch(API_URL + '?action=getResumen&placa=' + p + '&meses=12'),
-      fetch(API_URL + '?action=getAlertas&placa=' + p)
+      fetch(API_URL + '?action=getResumen&placa=' + placaActual + '&meses=12' + periodosQueryParam()),
+      fetch(API_URL + '?action=getAlertas&placa=' + placaActual)
     ]);
     const d = await rResumen.json();
     const a = await rAlertas.json();

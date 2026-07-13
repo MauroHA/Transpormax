@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transpormax — Registro</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  :root{
+    --bg: #161d27;
+    --surface: #202a37;
+    --surface-2: #283340;
+    --line: #37424f;
+    --text: #eef1f4;
+    --muted: #93a4b3;
+    --accent: #3fa796;
+    --accent-2: #e8a33d;
+    --danger: #d6604d;
+    --radius: 10px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:'Inter',sans-serif; padding:24px 16px 80px;
+  }
+  h1{
+    font-family:'Space Grotesk',sans-serif; font-size:22px; margin:0 0 4px;
+  }
+  .subt{color:var(--muted); font-size:13px; margin-bottom:24px;}
+  .placas{display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;}
+  .placa-tab{
+    font-family:'JetBrains Mono',monospace; font-weight:600; letter-spacing:1px;
+    padding:10px 16px; border-radius:6px; border:2px solid var(--line);
+    background:var(--surface); color:var(--muted); cursor:pointer; font-size:14px;
+    transition:.15s;
+  }
+  .placa-tab.activa{border-color:var(--accent); color:var(--text); background:var(--surface-2);}
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px; margin-bottom:16px;
+  }
+  .card h2{font-family:'Space Grotesk',sans-serif; font-size:15px; margin:0 0 12px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px;}
+  .metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px;}
+  .metric .num{font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:600;}
+  .metric .lbl{font-size:12px; color:var(--muted);}
+  .alerta{
+    display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:6px;
+    background:rgba(232,163,61,.12); border:1px solid var(--accent-2); color:var(--accent-2);
+    font-size:13px; margin-bottom:8px;
+  }
+  .alerta.vencido{background:rgba(214,96,77,.12); border-color:var(--danger); color:var(--danger);}
+  .cobro-alerta{
+    background:rgba(214,96,77,.12); border:1px solid var(--danger); color:var(--danger);
+    padding:10px 12px; border-radius:6px; font-size:13px; margin-bottom:10px;
+  }
+  .cobro-ok{color:var(--accent); font-size:13px;}
+  label{display:block; font-size:12px; color:var(--muted); margin:12px 0 4px;}
+  input[type=text], input[type=number], input[type=date], select, textarea{
+    width:100%; padding:10px; border-radius:6px; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--text); font-family:'Inter',sans-serif; font-size:14px;
+  }
+  input[type=file]{width:100%; padding:8px 0; color:var(--muted); font-size:13px;}
+  .tipo-toggle{display:flex; gap:8px; margin-top:12px;}
+  .tipo-btn{flex:1; padding:10px; text-align:center; border-radius:6px; border:1px solid var(--line);
+    background:var(--surface-2); cursor:pointer; font-size:14px; color:var(--muted);}
+  .tipo-btn.activo[data-tipo=Ingreso]{background:rgba(63,167,150,.15); border-color:var(--accent); color:var(--accent);}
+  .tipo-btn.activo[data-tipo=Egreso]{background:rgba(214,96,77,.15); border-color:var(--danger); color:var(--danger);}
+  button.primario{
+    margin-top:18px; width:100%; padding:13px; border:none; border-radius:8px;
+    background:var(--accent); color:#0d1a17; font-weight:600; font-size:14px; cursor:pointer;
+  }
+  button.secundario{
+    margin-top:10px; width:100%; padding:12px; border:1px solid var(--line); border-radius:8px;
+    background:transparent; color:var(--text); font-weight:500; font-size:13px; cursor:pointer;
+  }
+  button:disabled{opacity:.5; cursor:default;}
+  .msg{font-size:13px; margin-top:10px; padding:8px 10px; border-radius:6px;}
+  .msg.ok{background:rgba(63,167,150,.12); color:var(--accent);}
+  .msg.err{background:rgba(214,96,77,.12); color:var(--danger);}
+  .gasto-row{display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid var(--line);}
+  .gasto-row:last-child{border-bottom:none;}
+  .cfg{font-size:12px; color:var(--muted); margin-bottom:16px;}
+  .cfg input{margin-top:4px;}
+</style>
+</head>
+<body>
+
+<h1>Transpormax — Registro</h1>
+<div class="subt">Ingresos, egresos y reportes por vehículo</div>
+
+<div class="cfg" id="cfgBox" style="display:none">
+  URL del backend (Apps Script /exec):
+  <input type="text" id="apiUrl" placeholder="https://script.google.com/macros/s/XXXX/exec">
+  <button class="secundario" onclick="guardarApiUrl()">Guardar</button>
+</div>
+
+<div class="placas" id="placas"></div>
+
+<div class="card" id="resumenCard" style="display:none">
+  <h2 id="resumenTitulo">Resumen</h2>
+  <div id="cobroEstado"></div>
+  <div id="alertas"></div>
+  <div class="metrics">
+    <div class="metric"><div class="num" id="mIngreso">—</div><div class="lbl">Ingreso del mes</div></div>
+    <div class="metric"><div class="num" id="mGastos">—</div><div class="lbl">Gastos del mes</div></div>
+    <div class="metric"><div class="num" id="mNeto">—</div><div class="lbl">Utilidad neta</div></div>
+    <div class="metric"><div class="num" id="mKm">—</div><div class="lbl">Último km</div></div>
+  </div>
+  <div id="gastosDetalle" style="margin-top:14px"></div>
+  <button class="secundario" onclick="enviarReporte()">📧 Enviar reporte mensual al inversionista</button>
+  <div id="reporteMsg"></div>
+</div>
+
+<div class="card">
+  <h2>Nuevo movimiento</h2>
+  <div class="tipo-toggle">
+    <div class="tipo-btn activo" data-tipo="Ingreso" onclick="setTipo('Ingreso')">Ingreso</div>
+    <div class="tipo-btn" data-tipo="Egreso" onclick="setTipo('Egreso')">Egreso</div>
+  </div>
+
+  <label>Concepto</label>
+  <select id="concepto"></select>
+
+  <label>Fecha</label>
+  <input type="date" id="fecha">
+
+  <label>Valor (COP)</label>
+  <input type="number" id="total" placeholder="0">
+
+  <label>Kilometraje (opcional)</label>
+  <input type="number" id="kilometraje" placeholder="NA">
+
+  <label>Detalle (opcional)</label>
+  <textarea id="detalle" rows="2"></textarea>
+
+  <label>Adjuntar soporte / evidencia (máx. 3 archivos)</label>
+  <input type="file" id="archivos" multiple accept="image/*,.pdf">
+
+  <button class="primario" id="btnGuardar" onclick="registrarMovimiento()">Guardar movimiento</button>
+  <div id="formMsg"></div>
+</div>
+
+<script>
+let API_URL = localStorage.getItem('tp_api_url') || '';
+let placaActual = null;
+let tipoActual = 'Ingreso';
+const PLACAS = ['PWK971', 'PWK970', 'PWL000'];
+
+if (!API_URL) document.getElementById('cfgBox').style.display = 'block';
+document.getElementById('apiUrl').value = API_URL;
+
+function guardarApiUrl(){
+  API_URL = document.getElementById('apiUrl').value.trim();
+  localStorage.setItem('tp_api_url', API_URL);
+  document.getElementById('cfgBox').style.display = 'none';
+  cargarVehiculos();
+}
+
+function fmtMonto(n){
+  return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function setTipo(t){
+  tipoActual = t;
+  document.querySelectorAll('.tipo-btn').forEach(b => b.classList.toggle('activo', b.dataset.tipo === t));
+  cargarListas();
+}
+
+async function cargarVehiculos(){
+  const box = document.getElementById('placas');
+  box.innerHTML = '';
+  PLACAS.forEach(p => {
+    const el = document.createElement('div');
+    el.className = 'placa-tab';
+    el.textContent = p;
+    el.onclick = () => seleccionarPlaca(p);
+    el.id = 'tab-' + p;
+    box.appendChild(el);
+  });
+  seleccionarPlaca(PLACAS[0]);
+}
+
+async function seleccionarPlaca(p){
+  placaActual = p;
+  document.querySelectorAll('.placa-tab').forEach(t => t.classList.toggle('activa', t.id === 'tab-' + p));
+  document.getElementById('resumenCard').style.display = 'block';
+  document.getElementById('resumenTitulo').textContent = 'Cargando ' + p + '…';
+  await Promise.all([cargarResumen(), cargarAlertas(), cargarListas()]);
+}
+
+async function cargarListas(){
+  if (!API_URL || !placaActual) return;
+  const r = await fetch(API_URL + '?action=getListas&placa=' + placaActual);
+  const data = await r.json();
+  const sel = document.getElementById('concepto');
+  sel.innerHTML = '';
+  const opciones = tipoActual === 'Ingreso' ? data.ingresos : data.egresos;
+  opciones.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o; opt.textContent = o;
+    sel.appendChild(opt);
+  });
+}
+
+async function cargarResumen(){
+  const r = await fetch(API_URL + '?action=getResumen&placa=' + placaActual);
+  const d = await r.json();
+  document.getElementById('resumenTitulo').textContent = placaActual + ' — ' + d.inversionista + ' (' + d.periodo + ')';
+  document.getElementById('mIngreso').textContent = fmtMonto(d.ingresoMes);
+  document.getElementById('mGastos').textContent = fmtMonto(d.totalGastosMes);
+  document.getElementById('mNeto').textContent = fmtMonto(d.utilidadMes);
+  document.getElementById('mKm').textContent = d.ultimoKm ? d.ultimoKm.toLocaleString('es-CO') : '—';
+
+  const cobroBox = document.getElementById('cobroEstado');
+  if (d.estadoCobro && d.estadoCobro.nosDeben){
+    cobroBox.innerHTML = '<div class="cobro-alerta">⚠️ Nos deben — corte ' + d.estadoCobro.detalle.corte +
+      ', ' + d.estadoCobro.detalle.diasAtraso + ' días de atraso (' + fmtMonto(d.estadoCobro.detalle.valor) + ')</div>';
+  } else {
+    cobroBox.innerHTML = '<div class="cobro-ok">✓ Cuenta de cobro al día</div>';
+  }
+
+  const detalle = document.getElementById('gastosDetalle');
+  if (d.gastosMes && d.gastosMes.length){
+    detalle.innerHTML = d.gastosMes.map(g =>
+      '<div class="gasto-row"><span>' + g.fecha + ' — ' + g.concepto + '</span><span>' + fmtMonto(g.total) + '</span></div>'
+    ).join('');
+  } else {
+    detalle.innerHTML = '<div style="color:var(--muted); font-size:13px;">Sin gastos registrados este mes.</div>';
+  }
+}
+
+async function cargarAlertas(){
+  const r = await fetch(API_URL + '?action=getAlertas&placa=' + placaActual);
+  const d = await r.json();
+  const box = document.getElementById('alertas');
+  box.innerHTML = '';
+  (d.alertas || []).forEach(a => {
+    const div = document.createElement('div');
+    div.className = 'alerta' + (a.vencido ? ' vencido' : '');
+    if (a.tipo === 'Cambio de aceite'){
+      div.textContent = a.vencido ? '🛢️ Cambio de aceite vencido (' + Math.abs(a.kmRestantes) + ' km de más)'
+        : '🛢️ Cambio de aceite en ' + a.kmRestantes + ' km';
+    } else {
+      div.textContent = a.vencido ? '⚠️ ' + a.tipo + ' vencido desde ' + a.fecha
+        : '⚠️ ' + a.tipo + ' vence en ' + a.dias + ' días (' + a.fecha + ')';
+    }
+    box.appendChild(div);
+  });
+}
+
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function registrarMovimiento(){
+  const btn = document.getElementById('btnGuardar');
+  const msgBox = document.getElementById('formMsg');
+  msgBox.innerHTML = '';
+  btn.disabled = true; btn.textContent = 'Guardando…';
+
+  try{
+    const files = document.getElementById('archivos').files;
+    const archivos = [];
+    for (let i = 0; i < Math.min(files.length, 3); i++){
+      const b64 = await fileToBase64(files[i]);
+      archivos.push({ filename: files[i].name, mimeType: files[i].type, data: b64 });
+    }
+
+    const payload = {
+      action: 'registrarMovimiento',
+      placa: placaActual,
+      tipo: tipoActual,
+      concepto: document.getElementById('concepto').value,
+      fecha: document.getElementById('fecha').value || undefined,
+      total: document.getElementById('total').value,
+      kilometraje: document.getElementById('kilometraje').value || 'NA',
+      detalle: document.getElementById('detalle').value,
+      archivos: archivos
+    };
+
+    const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+
+    msgBox.innerHTML = '<div class="msg ok">Movimiento guardado' + (data.soportes && data.soportes.length ? ' con ' + data.soportes.length + ' soporte(s)' : '') + '.</div>';
+    document.getElementById('total').value = '';
+    document.getElementById('kilometraje').value = '';
+    document.getElementById('detalle').value = '';
+    document.getElementById('archivos').value = '';
+    cargarResumen();
+  } catch(err){
+    msgBox.innerHTML = '<div class="msg err">Error: ' + err.message + '</div>';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Guardar movimiento';
+  }
+}
+
+async function enviarReporte(){
+  const box = document.getElementById('reporteMsg');
+  box.innerHTML = '<div class="msg ok">Enviando…</div>';
+  try{
+    const r = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'enviarReporteMensual', placa: placaActual })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    box.innerHTML = '<div class="msg ok">Reporte enviado a ' + d.enviadoA + ' (copia a ' + d.cc + ').</div>';
+  } catch(err){
+    box.innerHTML = '<div class="msg err">Error: ' + err.message + '</div>';
+  }
+}
+
+document.getElementById('fecha').valueAsDate = new Date();
+if (API_URL) cargarVehiculos();
+</script>
+</body>
+</html>

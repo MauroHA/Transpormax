@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transpormax — Panel del inversionista</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  :root{
+    --bg:#161d27; --surface:#202a37; --surface-2:#283340; --line:#37424f;
+    --text:#eef1f4; --muted:#93a4b3; --accent:#3fa796; --accent-2:#e8a33d; --danger:#d6604d;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; padding:24px 16px 60px;}
+  .wrap{max-width:640px; margin:0 auto;}
+  h1{font-family:'Space Grotesk',sans-serif; font-size:22px; margin:0 0 4px;}
+  .subt{color:var(--muted); font-size:13px; margin-bottom:22px;}
+  .placas{display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;}
+  .placa-tab{
+    font-family:'JetBrains Mono',monospace; font-weight:600; letter-spacing:1px;
+    padding:10px 16px; border-radius:6px; border:2px solid var(--line);
+    background:var(--surface); color:var(--muted); cursor:pointer; font-size:14px;
+  }
+  .placa-tab.activa{border-color:var(--accent); color:var(--text); background:var(--surface-2);}
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:16px;}
+  .card h2{font-family:'Space Grotesk',sans-serif; font-size:15px; margin:0 0 14px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px;}
+  .header-veh{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:16px;}
+  .header-veh .placa{font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700;}
+  .header-veh .inv{color:var(--muted); font-size:13px;}
+  .metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:6px;}
+  .metric .num{font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:600;}
+  .metric.pos .num{color:var(--accent);}
+  .metric .lbl{font-size:12px; color:var(--muted); margin-top:2px;}
+  .cobro-alerta{background:rgba(214,96,77,.14); border:1px solid var(--danger); color:var(--danger); padding:12px; border-radius:8px; font-size:13px; margin-bottom:16px;}
+  .cobro-ok{background:rgba(63,167,150,.1); border:1px solid var(--accent); color:var(--accent); padding:10px 12px; border-radius:8px; font-size:13px; margin-bottom:16px;}
+  .gasto-row{display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:8px 0; border-bottom:1px solid var(--line); gap:10px;}
+  .gasto-row:last-child{border-bottom:none;}
+  .gasto-row .izq{display:flex; flex-direction:column;}
+  .gasto-row .fecha{color:var(--muted); font-size:11px;}
+  .soporte-link{font-size:11px; color:var(--accent); text-decoration:none;}
+  table.historial{width:100%; border-collapse:collapse; font-size:13px;}
+  table.historial th{text-align:left; color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase; padding-bottom:8px; border-bottom:1px solid var(--line);}
+  table.historial td{padding:8px 0; border-bottom:1px solid var(--line); font-family:'JetBrains Mono',monospace; font-size:12.5px;}
+  table.historial tr:last-child td{border-bottom:none;}
+  .loading{color:var(--muted); font-size:13px; padding:20px 0; text-align:center;}
+  .cfg{font-size:12px; color:var(--muted); margin-bottom:16px;}
+  .cfg input{width:100%; margin-top:4px; padding:8px; border-radius:6px; border:1px solid var(--line); background:var(--surface-2); color:var(--text);}
+  .cfg button{margin-top:6px; padding:8px 12px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--text); cursor:pointer;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Transpormax — Panel del inversionista</h1>
+  <div class="subt">Ingresos, gastos y rentabilidad, en tiempo real</div>
+
+  <div class="cfg" id="cfgBox" style="display:none">
+    URL del backend (Apps Script /exec):
+    <input type="text" id="apiUrl" placeholder="https://script.google.com/macros/s/XXXX/exec">
+    <button onclick="guardarApiUrl()">Guardar</button>
+  </div>
+
+  <div class="placas" id="placas"></div>
+  <div id="contenido"><div class="loading">Cargando…</div></div>
+</div>
+
+<script>
+let API_URL = localStorage.getItem('tp_api_url_dash') || '';
+const PLACAS = ['PWK971', 'PWK970', 'PWL000'];
+let placaActual = null;
+
+// ?placa=PWK971 en la URL = link privado de un solo vehículo (sin pestañas para cambiar).
+// Sin parámetro = vista con las 3 pestañas (pensada solo para uso tuyo, no para repartir).
+const params = new URLSearchParams(window.location.search);
+const placaForzada = params.get('placa');
+const soloUnVehiculo = placaForzada && PLACAS.includes(placaForzada.toUpperCase());
+
+if (!API_URL) document.getElementById('cfgBox').style.display = 'block';
+document.getElementById('apiUrl').value = API_URL;
+
+function guardarApiUrl(){
+  API_URL = document.getElementById('apiUrl').value.trim();
+  localStorage.setItem('tp_api_url_dash', API_URL);
+  document.getElementById('cfgBox').style.display = 'none';
+  cargarVehiculos();
+}
+
+function fmtMonto(n){
+  return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function cargarVehiculos(){
+  const box = document.getElementById('placas');
+  box.innerHTML = '';
+
+  if (soloUnVehiculo){
+    // Link privado de un solo inversionista: no se muestran pestañas de otros vehículos.
+    box.style.display = 'none';
+    seleccionarPlaca(placaForzada.toUpperCase());
+    return;
+  }
+
+  box.style.display = 'flex';
+  PLACAS.forEach(p => {
+    const el = document.createElement('div');
+    el.className = 'placa-tab';
+    el.textContent = p;
+    el.id = 'tab-' + p;
+    el.onclick = () => seleccionarPlaca(p);
+    box.appendChild(el);
+  });
+  seleccionarPlaca(PLACAS[0]);
+}
+
+async function seleccionarPlaca(p){
+  placaActual = p;
+  document.querySelectorAll('.placa-tab').forEach(t => t.classList.toggle('activa', t.id === 'tab-' + p));
+  document.getElementById('contenido').innerHTML = '<div class="loading">Cargando ' + p + '…</div>';
+  try{
+    const r = await fetch(API_URL + '?action=getResumen&placa=' + p + '&meses=12');
+    const d = await r.json();
+    renderResumen(d);
+  } catch(err){
+    document.getElementById('contenido').innerHTML = '<div class="loading">Error cargando datos: ' + err.message + '</div>';
+  }
+}
+
+function renderResumen(d){
+  const cobroHtml = d.estadoCobro && d.estadoCobro.nosDeben
+    ? '<div class="cobro-alerta">⚠️ Cuenta de cobro pendiente de pago — corte ' + d.estadoCobro.detalle.corte +
+      ', ' + d.estadoCobro.detalle.diasAtraso + ' días de atraso (' + fmtMonto(d.estadoCobro.detalle.valor) + ')</div>'
+    : '<div class="cobro-ok">✓ Cuenta de cobro al día</div>';
+
+  const gastosHtml = (d.gastosMes && d.gastosMes.length)
+    ? d.gastosMes.map(g => (
+        '<div class="gasto-row"><div class="izq"><span>' + g.concepto + '</span><span class="fecha">' + g.fecha + '</span></div>' +
+        '<div style="text-align:right">' + fmtMonto(g.total) +
+        (g.soportes && g.soportes.length ? '<br>' + g.soportes.map((s,i) => '<a class="soporte-link" href="' + s + '" target="_blank">soporte ' + (i+1) + '</a>').join(' · ') : '') +
+        '</div></div>'
+      )).join('')
+    : '<div style="color:var(--muted); font-size:13px;">Sin gastos registrados este mes.</div>';
+
+  const historialHtml = (d.historial && d.historial.length)
+    ? '<table class="historial"><tr><th>Periodo</th><th>Ingreso</th><th>Gastos</th><th>Neto</th></tr>' +
+      d.historial.slice().reverse().map(h =>
+        '<tr><td>' + h.periodo + '</td><td>' + fmtMonto(h.ingreso) + '</td><td>' + fmtMonto(h.egreso) + '</td><td>' + fmtMonto(h.neto) + '</td></tr>'
+      ).join('') + '</table>'
+    : '<div style="color:var(--muted); font-size:13px;">Aún no hay historial suficiente.</div>';
+
+  document.getElementById('contenido').innerHTML = `
+    <div class="card">
+      <div class="header-veh">
+        <span class="placa">${d.placa}</span>
+        <span class="inv">${d.inversionista}</span>
+      </div>
+      ${cobroHtml}
+      <div class="metrics">
+        <div class="metric"><div class="num">${fmtMonto(d.ingresoMes)}</div><div class="lbl">Ingreso — ${d.periodo}</div></div>
+        <div class="metric"><div class="num">${fmtMonto(d.totalGastosMes)}</div><div class="lbl">Gastos del mes</div></div>
+        <div class="metric pos"><div class="num">${fmtMonto(d.utilidadMes)}</div><div class="lbl">Utilidad neta</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Gastos del mes (con soporte)</h2>
+      ${gastosHtml}
+    </div>
+    <div class="card">
+      <h2>Historial mes a mes</h2>
+      ${historialHtml}
+    </div>
+  `;
+}
+
+if (API_URL) cargarVehiculos();
+</script>
+</body>
+</html>

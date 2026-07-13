@@ -99,17 +99,32 @@
 
 <div class="card" id="resumenCard" style="display:none">
   <h2 id="resumenTitulo">Resumen</h2>
-  <div id="cobroEstado"></div>
-  <div id="alertas"></div>
   <div class="metrics">
     <div class="metric"><div class="num" id="mIngreso">—</div><div class="lbl">Ingreso del mes</div></div>
-    <div class="metric"><div class="num" id="mGastos">—</div><div class="lbl">Gastos del mes</div></div>
+    <div class="metric"><div class="num" id="mGastos">—</div><div class="lbl">Gastos operativos</div></div>
     <div class="metric"><div class="num" id="mNeto">—</div><div class="lbl">Utilidad neta</div></div>
+    <div class="metric"><div class="num" id="mSaldo">—</div><div class="lbl">Saldo pendiente por transferir</div></div>
     <div class="metric"><div class="num" id="mKm">—</div><div class="lbl">Último km</div></div>
   </div>
   <div id="gastosDetalle" style="margin-top:14px"></div>
-  <button class="secundario" onclick="enviarReporte()">📧 Enviar reporte mensual al inversionista</button>
+  <div id="pagosDetalle" style="margin-top:10px"></div>
+  <button class="secundario" onclick="abrirPreviaReporte()">📧 Enviar reporte mensual al inversionista</button>
   <div id="reporteMsg"></div>
+
+  <h2 style="margin-top:20px">Alertas</h2>
+  <div id="cobroEstado"></div>
+  <div id="alertas"></div>
+</div>
+
+<div class="card" id="previaCard" style="display:none">
+  <h2>Previsualizar reporte antes de enviar</h2>
+  <label>Asunto</label>
+  <input type="text" id="previaAsunto">
+  <label>Cuerpo del correo (puedes editarlo)</label>
+  <textarea id="previaCuerpo" rows="16" style="font-family:'JetBrains Mono',monospace; font-size:12.5px;"></textarea>
+  <button class="primario" id="btnConfirmarEnvio" onclick="confirmarEnvioReporte()">Enviar este correo</button>
+  <button class="secundario" onclick="document.getElementById('previaCard').style.display='none'">Cancelar</button>
+  <div id="previaMsg"></div>
 </div>
 
 <div class="card">
@@ -222,11 +237,24 @@ async function cargarResumen(){
 
   const detalle = document.getElementById('gastosDetalle');
   if (d.gastosMes && d.gastosMes.length){
-    detalle.innerHTML = d.gastosMes.map(g =>
-      '<div class="gasto-row"><span>' + g.fecha + ' — ' + g.concepto + '</span><span>' + fmtMonto(g.total) + '</span></div>'
-    ).join('');
+    detalle.innerHTML = '<div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Gastos operativos</div>' +
+      d.gastosMes.map(g =>
+        '<div class="gasto-row"><span>' + g.fecha + ' — ' + g.concepto + '</span><span>' + fmtMonto(g.total) + '</span></div>'
+      ).join('');
   } else {
-    detalle.innerHTML = '<div style="color:var(--muted); font-size:13px;">Sin gastos registrados este mes.</div>';
+    detalle.innerHTML = '<div style="color:var(--muted); font-size:13px;">Sin gastos operativos registrados este mes.</div>';
+  }
+
+  document.getElementById('mSaldo').textContent = fmtMonto(d.saldoPendiente);
+
+  const pagosBox = document.getElementById('pagosDetalle');
+  if (d.pagosPropietarioMes && d.pagosPropietarioMes.length){
+    pagosBox.innerHTML = '<div style="font-size:12px; color:var(--muted); margin:10px 0 4px;">Pagos realizados al inversionista este mes</div>' +
+      d.pagosPropietarioMes.map(p =>
+        '<div class="gasto-row"><span>' + p.fecha + '</span><span>' + fmtMonto(p.total) + '</span></div>'
+      ).join('');
+  } else {
+    pagosBox.innerHTML = '';
   }
 }
 
@@ -301,19 +329,45 @@ async function registrarMovimiento(){
   }
 }
 
-async function enviarReporte(){
+async function abrirPreviaReporte(){
   const box = document.getElementById('reporteMsg');
-  box.innerHTML = '<div class="msg ok">Enviando…</div>';
+  box.innerHTML = '<div class="msg ok">Generando previsualización…</div>';
+  try{
+    const r = await fetch(API_URL + '?action=previsualizarReporte&placa=' + placaActual);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    document.getElementById('previaAsunto').value = d.asunto;
+    document.getElementById('previaCuerpo').value = d.cuerpo;
+    document.getElementById('previaCard').style.display = 'block';
+    document.getElementById('previaMsg').innerHTML = '';
+    box.innerHTML = '';
+    document.getElementById('previaCard').scrollIntoView({ behavior: 'smooth' });
+  } catch(err){
+    box.innerHTML = '<div class="msg err">Error: ' + err.message + '</div>';
+  }
+}
+
+async function confirmarEnvioReporte(){
+  const btn = document.getElementById('btnConfirmarEnvio');
+  const msgBox = document.getElementById('previaMsg');
+  btn.disabled = true; btn.textContent = 'Enviando…';
   try{
     const r = await fetch(API_URL, {
       method: 'POST',
-      body: JSON.stringify({ action: 'enviarReporteMensual', placa: placaActual })
+      body: JSON.stringify({
+        action: 'enviarReporteMensual',
+        placa: placaActual,
+        asunto: document.getElementById('previaAsunto').value,
+        cuerpo: document.getElementById('previaCuerpo').value
+      })
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    box.innerHTML = '<div class="msg ok">Reporte enviado a ' + d.enviadoA + ' (copia a ' + d.cc + ').</div>';
+    msgBox.innerHTML = '<div class="msg ok">Reporte enviado a ' + d.enviadoA + ' (copia a ' + d.cc + ').</div>';
   } catch(err){
-    box.innerHTML = '<div class="msg err">Error: ' + err.message + '</div>';
+    msgBox.innerHTML = '<div class="msg err">Error: ' + err.message + '</div>';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Enviar este correo';
   }
 }
 

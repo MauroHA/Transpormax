@@ -117,20 +117,19 @@ async function seleccionarPlaca(p){
   document.querySelectorAll('.placa-tab').forEach(t => t.classList.toggle('activa', t.id === 'tab-' + p));
   document.getElementById('contenido').innerHTML = '<div class="loading">Cargando ' + p + '…</div>';
   try{
-    const r = await fetch(API_URL + '?action=getResumen&placa=' + p + '&meses=12');
-    const d = await r.json();
-    renderResumen(d);
+    const [rResumen, rAlertas] = await Promise.all([
+      fetch(API_URL + '?action=getResumen&placa=' + p + '&meses=12'),
+      fetch(API_URL + '?action=getAlertas&placa=' + p)
+    ]);
+    const d = await rResumen.json();
+    const a = await rAlertas.json();
+    renderResumen(d, a.alertas || []);
   } catch(err){
     document.getElementById('contenido').innerHTML = '<div class="loading">Error cargando datos: ' + err.message + '</div>';
   }
 }
 
-function renderResumen(d){
-  const cobroHtml = d.estadoCobro && d.estadoCobro.nosDeben
-    ? '<div class="cobro-alerta">⚠️ Cuenta de cobro pendiente de pago — corte ' + d.estadoCobro.detalle.corte +
-      ', ' + d.estadoCobro.detalle.diasAtraso + ' días de atraso (' + fmtMonto(d.estadoCobro.detalle.valor) + ')</div>'
-    : '<div class="cobro-ok">✓ Cuenta de cobro al día</div>';
-
+function renderResumen(d, alertas){
   const gastosHtml = (d.gastosMes && d.gastosMes.length)
     ? d.gastosMes.map(g => (
         '<div class="gasto-row"><div class="izq"><span>' + g.concepto + '</span><span class="fecha">' + g.fecha + '</span></div>' +
@@ -138,7 +137,16 @@ function renderResumen(d){
         (g.soportes && g.soportes.length ? '<br>' + g.soportes.map((s,i) => '<a class="soporte-link" href="' + s + '" target="_blank">soporte ' + (i+1) + '</a>').join(' · ') : '') +
         '</div></div>'
       )).join('')
-    : '<div style="color:var(--muted); font-size:13px;">Sin gastos registrados este mes.</div>';
+    : '<div style="color:var(--muted); font-size:13px;">Sin gastos operativos registrados este mes.</div>';
+
+  const pagosHtml = (d.pagosPropietarioMes && d.pagosPropietarioMes.length)
+    ? d.pagosPropietarioMes.map(p => (
+        '<div class="gasto-row"><div class="izq"><span>Pago a propietario</span><span class="fecha">' + p.fecha + '</span></div>' +
+        '<div style="text-align:right">' + fmtMonto(p.total) +
+        (p.soportes && p.soportes.length ? '<br>' + p.soportes.map((s,i) => '<a class="soporte-link" href="' + s + '" target="_blank">soporte ' + (i+1) + '</a>').join(' · ') : '') +
+        '</div></div>'
+      )).join('')
+    : '<div style="color:var(--muted); font-size:13px;">Sin pagos realizados este mes.</div>';
 
   const historialHtml = (d.historial && d.historial.length)
     ? '<table class="historial"><tr><th>Periodo</th><th>Ingreso</th><th>Gastos</th><th>Neto</th></tr>' +
@@ -147,17 +155,35 @@ function renderResumen(d){
       ).join('') + '</table>'
     : '<div style="color:var(--muted); font-size:13px;">Aún no hay historial suficiente.</div>';
 
+  const alertaLineas = [];
+  if (d.estadoCobro && d.estadoCobro.nosDeben) {
+    alertaLineas.push('<div class="cobro-alerta">⚠️ Cuenta de cobro pendiente de pago — corte ' + d.estadoCobro.detalle.corte +
+      ', ' + d.estadoCobro.detalle.diasAtraso + ' días de atraso (' + fmtMonto(d.estadoCobro.detalle.valor) + ')</div>');
+  }
+  (alertas || []).forEach(a => {
+    let texto;
+    if (a.tipo === 'Cambio de aceite'){
+      texto = a.vencido ? '🛢️ Cambio de aceite vencido (' + Math.abs(a.kmRestantes) + ' km de más)'
+        : '🛢️ Cambio de aceite en ' + a.kmRestantes + ' km';
+    } else {
+      texto = a.vencido ? '⚠️ ' + a.tipo + ' vencido desde ' + a.fecha
+        : '⚠️ ' + a.tipo + ' vence en ' + a.dias + ' días (' + a.fecha + ')';
+    }
+    alertaLineas.push('<div class="cobro-alerta">' + texto + '</div>');
+  });
+  const alertasHtml = alertaLineas.length ? alertaLineas.join('') : '<div class="cobro-ok">✓ Sin alertas activas</div>';
+
   document.getElementById('contenido').innerHTML = `
     <div class="card">
       <div class="header-veh">
         <span class="placa">${d.placa}</span>
         <span class="inv">${d.inversionista}</span>
       </div>
-      ${cobroHtml}
       <div class="metrics">
         <div class="metric"><div class="num">${fmtMonto(d.ingresoMes)}</div><div class="lbl">Ingreso — ${d.periodo}</div></div>
-        <div class="metric"><div class="num">${fmtMonto(d.totalGastosMes)}</div><div class="lbl">Gastos del mes</div></div>
+        <div class="metric"><div class="num">${fmtMonto(d.totalGastosMes)}</div><div class="lbl">Gastos operativos</div></div>
         <div class="metric pos"><div class="num">${fmtMonto(d.utilidadMes)}</div><div class="lbl">Utilidad neta</div></div>
+        <div class="metric pos"><div class="num">${fmtMonto(d.saldoPendiente)}</div><div class="lbl">Saldo pendiente por transferir</div></div>
       </div>
     </div>
     <div class="card">
@@ -165,8 +191,16 @@ function renderResumen(d){
       ${gastosHtml}
     </div>
     <div class="card">
+      <h2>Pagos realizados este mes</h2>
+      ${pagosHtml}
+    </div>
+    <div class="card">
       <h2>Historial mes a mes</h2>
       ${historialHtml}
+    </div>
+    <div class="card">
+      <h2>Alertas</h2>
+      ${alertasHtml}
     </div>
   `;
 }

@@ -82,6 +82,12 @@
   .gasto-row:last-child{border-bottom:none;}
   .cfg{font-size:12px; color:var(--muted); margin-bottom:16px;}
   .cfg input{margin-top:4px;}
+  .mes-chip{
+    display:flex; align-items:center; gap:6px; padding:7px 12px; border-radius:20px;
+    border:1px solid var(--line); background:var(--surface-2); font-size:13px; cursor:pointer; user-select:none;
+  }
+  .mes-chip.activo{border-color:var(--accent); background:rgba(63,167,150,.15); color:var(--accent);}
+  .mes-chip input{margin:0;}
 </style>
 </head>
 <body>
@@ -97,10 +103,15 @@
 
 <div class="placas" id="placas"></div>
 
+<div class="card" id="filtroCard" style="display:none">
+  <h2>Filtrar por mes</h2>
+  <div id="filtroMeses" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+</div>
+
 <div class="card" id="resumenCard" style="display:none">
   <h2 id="resumenTitulo">Resumen</h2>
   <div class="metrics">
-    <div class="metric"><div class="num" id="mIngreso">—</div><div class="lbl">Ingreso del mes</div></div>
+    <div class="metric"><div class="num" id="mIngreso">—</div><div class="lbl">Ingreso</div></div>
     <div class="metric"><div class="num" id="mGastos">—</div><div class="lbl">Gastos operativos</div></div>
     <div class="metric"><div class="num" id="mNeto">—</div><div class="lbl">Utilidad neta</div></div>
     <div class="metric"><div class="num" id="mSaldo">—</div><div class="lbl">Saldo pendiente por transferir</div></div>
@@ -160,6 +171,7 @@
 let API_URL = localStorage.getItem('tp_api_url') || '';
 let placaActual = null;
 let tipoActual = 'Ingreso';
+let periodosSeleccionados = null; // null = mes actual (default); 'todos'; o array de claves 'YYYY-M'
 const PLACAS = ['PWK971', 'PWK970', 'PWL000'];
 
 if (!API_URL) document.getElementById('cfgBox').style.display = 'block';
@@ -198,10 +210,73 @@ async function cargarVehiculos(){
 
 async function seleccionarPlaca(p){
   placaActual = p;
+  periodosSeleccionados = null;
   document.querySelectorAll('.placa-tab').forEach(t => t.classList.toggle('activa', t.id === 'tab-' + p));
   document.getElementById('resumenCard').style.display = 'block';
+  document.getElementById('filtroCard').style.display = 'block';
   document.getElementById('resumenTitulo').textContent = 'Cargando ' + p + '…';
-  await Promise.all([cargarResumen(), cargarAlertas(), cargarListas()]);
+  await Promise.all([cargarPeriodos(), cargarResumen(), cargarAlertas(), cargarListas()]);
+}
+
+function periodosQueryParam(){
+  if (periodosSeleccionados === null) return '';
+  if (periodosSeleccionados === 'todos') return '&periodos=todos';
+  if (Array.isArray(periodosSeleccionados) && periodosSeleccionados.length) return '&periodos=' + periodosSeleccionados.join(',');
+  return '';
+}
+
+async function cargarPeriodos(){
+  const box = document.getElementById('filtroMeses');
+  box.innerHTML = '<span style="color:var(--muted); font-size:13px;">Cargando meses…</span>';
+  const r = await fetch(API_URL + '?action=getPeriodos&placa=' + placaActual);
+  const data = await r.json();
+  const periodos = data.periodos || [];
+
+  box.innerHTML = '';
+
+  const chipTodos = document.createElement('label');
+  chipTodos.className = 'mes-chip' + (periodosSeleccionados === 'todos' ? ' activo' : '');
+  chipTodos.innerHTML = '<input type="checkbox" data-clave="todos"> Todos';
+  box.appendChild(chipTodos);
+
+  periodos.forEach(p => {
+    const chip = document.createElement('label');
+    const marcado = Array.isArray(periodosSeleccionados) && periodosSeleccionados.includes(p.clave);
+    chip.className = 'mes-chip' + (marcado ? ' activo' : '');
+    chip.innerHTML = '<input type="checkbox" data-clave="' + p.clave + '"> ' + p.etiqueta;
+    box.appendChild(chip);
+  });
+
+  box.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', onFiltroMesChange);
+  });
+}
+
+function onFiltroMesChange(e){
+  const clave = e.target.dataset.clave;
+  const box = document.getElementById('filtroMeses');
+
+  if (clave === 'todos'){
+    if (e.target.checked){
+      periodosSeleccionados = 'todos';
+      box.querySelectorAll('input[type=checkbox]').forEach(cb => { if (cb.dataset.clave !== 'todos') cb.checked = false; });
+    } else {
+      periodosSeleccionados = null;
+    }
+  } else {
+    box.querySelector('input[data-clave="todos"]').checked = false;
+    const marcados = Array.from(box.querySelectorAll('input[type=checkbox]'))
+      .filter(cb => cb.checked && cb.dataset.clave !== 'todos')
+      .map(cb => cb.dataset.clave);
+    periodosSeleccionados = marcados.length ? marcados : null;
+  }
+
+  box.querySelectorAll('label.mes-chip').forEach(l => {
+    const cb = l.querySelector('input');
+    l.classList.toggle('activo', cb.checked);
+  });
+
+  cargarResumen();
 }
 
 async function cargarListas(){
@@ -219,7 +294,7 @@ async function cargarListas(){
 }
 
 async function cargarResumen(){
-  const r = await fetch(API_URL + '?action=getResumen&placa=' + placaActual);
+  const r = await fetch(API_URL + '?action=getResumen&placa=' + placaActual + periodosQueryParam());
   const d = await r.json();
   document.getElementById('resumenTitulo').textContent = placaActual + ' — ' + d.inversionista + ' (' + d.periodo + ')';
   document.getElementById('mIngreso').textContent = fmtMonto(d.ingresoMes);

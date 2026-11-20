@@ -101,6 +101,11 @@
   <button class="secundario" onclick="guardarApiUrl()">Guardar</button>
 </div>
 
+<div class="card" id="globalCard" style="display:none">
+  <h2>Total del negocio</h2>
+  <div id="globalBox"></div>
+</div>
+
 <div class="placas" id="placas"></div>
 
 <div class="card" id="filtroCard" style="display:none">
@@ -117,6 +122,8 @@
     <div class="metric"><div class="num" id="mSaldo">—</div><div class="lbl">Saldo pendiente por transferir</div></div>
     <div class="metric"><div class="num" id="mKm">—</div><div class="lbl">Último km</div></div>
   </div>
+  <div id="carteraBox" style="margin-top:14px"></div>
+  <div id="pendientesBox" style="margin-top:10px"></div>
   <div id="gastosDetalle" style="margin-top:14px"></div>
   <div id="pagosDetalle" style="margin-top:10px"></div>
   <button class="secundario" onclick="abrirPreviaReporte()">📧 Enviar reporte mensual al inversionista</button>
@@ -151,8 +158,33 @@
   <label>Fecha</label>
   <input type="date" id="fecha">
 
-  <label>Valor (COP)</label>
+  <label id="lblValor">Valor (COP) — en Ingreso: lo que realmente consignaron</label>
   <input type="number" id="total" placeholder="0">
+
+  <div id="ingresoCuentaBox">
+    <label>Cuenta de cobro que pagan</label>
+    <select id="ingresoCuenta" onchange="onIngresoCuentaChange()"></select>
+    <div style="font-size:12px; color:var(--muted); margin-top:4px;">Registra aquí lo que realmente te depositaron. Se replica en "Control de cobros" (Valor consignado y día de pago).</div>
+  </div>
+
+  <div id="pagadoPorBox" style="display:none">
+    <label>Pagado por</label>
+    <select id="pagadoPor" onchange="onPagadoPorChange()">
+      <option value="Yo">Yo (lo pagué directamente)</option>
+      <option value="Transpormax">Transpormax (taller) — me lo descuentan</option>
+    </select>
+    <div id="descuentoBox" style="display:none">
+      <label>Estado del descuento</label>
+      <select id="descuentoEstado" onchange="onPagadoPorChange()">
+        <option value="Pendiente">Pendiente (aún no lo descuentan)</option>
+        <option value="Descontado">Ya descontado en una cuenta de cobro</option>
+      </select>
+      <div id="descuentoCuentaBox" style="display:none">
+        <label>¿En qué cuenta de cobro lo descontaron?</label>
+        <select id="descuentoCuenta"></select>
+      </div>
+    </div>
+  </div>
 
   <label>Kilometraje (opcional)</label>
   <input type="number" id="kilometraje" placeholder="NA">
@@ -172,7 +204,8 @@ let API_URL = localStorage.getItem('tp_api_url') || '';
 let placaActual = null;
 let tipoActual = 'Ingreso';
 let periodosSeleccionados = null; // null = mes actual (default); 'todos'; o array de claves 'YYYY-M'
-const PLACAS = ['PWK971', 'PWK970', 'PWL000'];
+const PLACAS = ['PWK971', 'PWK970'];
+let carteraActual = null;
 
 if (!API_URL) document.getElementById('cfgBox').style.display = 'block';
 document.getElementById('apiUrl').value = API_URL;
@@ -190,6 +223,10 @@ function fmtMonto(n){
 
 function setTipo(t){
   tipoActual = t;
+  const pb = document.getElementById('pagadoPorBox');
+  if (pb) pb.style.display = t === 'Egreso' ? '' : 'none';
+  const ib = document.getElementById('ingresoCuentaBox');
+  if (ib) ib.style.display = t === 'Ingreso' ? '' : 'none';
   document.querySelectorAll('.tipo-btn').forEach(b => b.classList.toggle('activo', b.dataset.tipo === t));
   cargarListas();
 }
@@ -205,7 +242,42 @@ async function cargarVehiculos(){
     el.id = 'tab-' + p;
     box.appendChild(el);
   });
+  cargarGlobal();
   seleccionarPlaca(PLACAS[0]);
+}
+
+async function cargarGlobal(){
+  const card = document.getElementById('globalCard');
+  const box = document.getElementById('globalBox');
+  card.style.display = 'block';
+  try {
+    const r = await fetch(API_URL + '?action=getResumenGlobal');
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const t = d.totales;
+    const fila = v => '<div style="padding:10px 0; border-bottom:1px solid var(--line);">' +
+      '<div style="font-weight:600; font-size:13px;">' + v.placa + ' — ' + v.inversionista + '</div>' +
+      '<div style="display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12.5px; margin-top:4px; color:var(--muted);">' +
+      '<span>Transpormax debe: <b style="color:var(--text)">' + fmtMonto(v.meDebe) + '</b></span>' +
+      '<span>Vencido: <b style="color:' + (v.vencida > 0 ? 'var(--danger)' : 'var(--text)') + '">' + fmtMonto(v.vencida) + '</b>' + (v.cuentasVencidas ? ' (' + v.cuentasVencidas + ' cuentas)' : '') + '</span>' +
+      '<span>Por vencer: <b style="color:var(--text)">' + fmtMonto(v.vigente) + '</b></span>' +
+      (v.cuentasSinEnviar ? '<span style="color:var(--danger)">Sin enviar: ' + v.cuentasSinEnviar + ' cuenta(s)</span>' : '') +
+      '<span>Descuentos por aplicar: <b style="color:var(--text)">' + fmtMonto(v.descuentosPendientes) + '</b></span>' +
+      '<span>Utilidad acumulada: <b style="color:var(--text)">' + fmtMonto(v.utilidadAcumulada) + '</b></span>' +
+      '<span>Saldo por transferir: <b style="color:var(--text)">' + fmtMonto(v.saldoPendiente) + '</b></span>' +
+      '</div></div>';
+    box.innerHTML =
+      '<div class="metrics">' +
+      '<div class="metric"><div class="num">' + fmtMonto(t.meDebe) + '</div><div class="lbl">Transpormax nos debe</div></div>' +
+      '<div class="metric"><div class="num" style="color:' + (t.vencida > 0 ? 'var(--danger)' : 'inherit') + '">' + fmtMonto(t.vencida) + '</div><div class="lbl">Cartera vencida</div></div>' +
+      '<div class="metric"><div class="num">' + fmtMonto(t.vigente) + '</div><div class="lbl">Por vencer</div></div>' +
+      '<div class="metric"><div class="num">' + fmtMonto(t.descuentosPendientes) + '</div><div class="lbl">Descuentos por aplicar</div></div>' +
+      '<div class="metric"><div class="num">' + fmtMonto(t.utilidadAcumulada) + '</div><div class="lbl">Utilidad acumulada</div></div>' +
+      '<div class="metric"><div class="num">' + fmtMonto(t.saldoPendiente) + '</div><div class="lbl">Saldo por transferir</div></div>' +
+      '</div><div style="margin-top:10px">' + d.vehiculos.map(fila).join('') + '</div>';
+  } catch(err){
+    box.innerHTML = '<div style="color:var(--muted); font-size:13px;">No se pudo cargar el total: ' + err.message + '</div>';
+  }
 }
 
 async function seleccionarPlaca(p){
@@ -298,29 +370,43 @@ async function cargarResumen(){
   const d = await r.json();
   document.getElementById('resumenTitulo').textContent = placaActual + ' — ' + d.inversionista + ' (' + d.periodo + ')';
   document.getElementById('mIngreso').textContent = fmtMonto(d.ingresoMes);
+  document.getElementById('mIngreso').title = d.ingresoPorDescuentoMes > 0 ? 'Incluye ' + fmtMonto(d.ingresoPorDescuentoMes) + ' por gastos descontados por Transpormax' : '';
   document.getElementById('mGastos').textContent = fmtMonto(d.totalGastosMes);
   document.getElementById('mNeto').textContent = fmtMonto(d.utilidadMes);
   document.getElementById('mKm').textContent = d.ultimoKm ? d.ultimoKm.toLocaleString('es-CO') : '—';
 
   const cobroBox = document.getElementById('cobroEstado');
+  let alertaCobro = '';
   if (d.estadoCobro && d.estadoCobro.nosDeben){
-    cobroBox.innerHTML = '<div class="cobro-alerta">⚠️ Nos deben — corte ' + d.estadoCobro.detalle.corte +
-      ', ' + d.estadoCobro.detalle.diasAtraso + ' días de atraso (' + fmtMonto(d.estadoCobro.detalle.valor) + ')</div>';
+    const dv = d.estadoCobro.detalle;
+    alertaCobro += '<div class="cobro-alerta">⚠️ Transpormax tiene ' + dv.cuentas + ' cuenta(s) de cobro vencida(s) por ' + fmtMonto(dv.valor) +
+      ' — la más antigua: ' + dv.corte + ' (' + dv.diasAtraso + ' días de atraso)</div>';
   } else {
-    cobroBox.innerHTML = '<div class="cobro-ok">✓ Cuenta de cobro al día</div>';
+    alertaCobro += '<div class="cobro-ok">✓ Sin cuentas de cobro vencidas</div>';
   }
+  if (d.estadoCobro && d.estadoCobro.sinEnviar && d.estadoCobro.sinEnviar.length){
+    alertaCobro += '<div class="cobro-alerta">📨 Sin enviar a Transpormax: ' +
+      d.estadoCobro.sinEnviar.map(c => c.cc + ' (' + c.corte + ')').join(', ') + '</div>';
+  }
+  cobroBox.innerHTML = alertaCobro;
+  carteraActual = d.cartera || null;
+  renderCartera(d.cartera);
+  poblarCuentasSelects();
 
   const detalle = document.getElementById('gastosDetalle');
   if (d.gastosMes && d.gastosMes.length){
-    detalle.innerHTML = '<div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Gastos operativos</div>' +
+    const sub = d.totalGastosDescTranspMes > 0
+      ? '<div style="font-size:12px; color:var(--muted); margin-bottom:6px;">Pagados por mí: ' + fmtMonto(d.totalGastosPagadosYoMes) + ' · Descontados por Transpormax: ' + fmtMonto(d.totalGastosDescTranspMes) + '</div>' : '';
+    detalle.innerHTML = '<div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Gastos operativos</div>' + sub +
       d.gastosMes.map(g =>
-        '<div class="gasto-row"><span>' + g.fecha + ' — ' + g.concepto + '</span><span>' + fmtMonto(g.total) + '</span></div>'
+        '<div class="gasto-row"><span>' + g.fecha + ' — ' + g.concepto + (g.pagadoPor === 'Transpormax' ? ' <em style="color:var(--muted)">(Transpormax · ' + (g.descuento === 'Descontado' ? 'descontado en ' + g.cuentaCobro : 'pendiente de descontar') + ')</em>' : '') + '</span><span>' + fmtMonto(g.total) + '</span></div>'
       ).join('');
   } else {
     detalle.innerHTML = '<div style="color:var(--muted); font-size:13px;">Sin gastos operativos registrados este mes.</div>';
   }
 
   document.getElementById('mSaldo').textContent = fmtMonto(d.saldoPendiente);
+  document.getElementById('mSaldo').title = d.gastosTallerPorDescontar > 0 ? 'No resta ' + fmtMonto(d.gastosTallerPorDescontar) + ' de gastos de taller por descontar' : '';
 
   const pagosBox = document.getElementById('pagosDetalle');
   if (d.pagosPropietarioMes && d.pagosPropietarioMes.length){
@@ -331,6 +417,95 @@ async function cargarResumen(){
   } else {
     pagosBox.innerHTML = '';
   }
+}
+
+function renderCartera(c){
+  const box = document.getElementById('carteraBox');
+  const pend = document.getElementById('pendientesBox');
+  if (!c){ box.innerHTML = ''; pend.innerHTML = ''; return; }
+  const t = c.totales;
+  const abiertas = c.cuentas.filter(x => x.estado === 'Vencida' || x.estado === 'Vigente' || x.estado === 'Sin enviar');
+  let html = '<div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Cartera con Transpormax (plazo 45 días desde la presentación)</div>' +
+    '<div style="font-size:13px; margin-bottom:6px;">Nos deben <b>' + fmtMonto(t.meDebe) + '</b> · vencido <b style="color:' + (t.vencida > 0 ? 'var(--danger)' : 'inherit') + '">' + fmtMonto(t.vencida) + '</b> · por vencer <b>' + fmtMonto(t.vigente) + '</b>' +
+    (t.descuentosPendientes > 0 ? ' · próximo pago estimado <b>' + fmtMonto(t.proximoPagoEstimado) + '</b> (tras descuentos pendientes de ' + fmtMonto(t.descuentosPendientes) + ')' : '') + '</div>';
+  if (abiertas.length){
+    html += abiertas.map(x => {
+      const est = x.estado === 'Vencida' ? '<span style="color:var(--danger)">vencida hace ' + x.diasAtraso + ' d</span>'
+        : x.estado === 'Sin enviar' ? '<span style="color:var(--danger)">sin enviar</span>'
+        : 'vence en ' + x.diasParaVencer + ' d';
+      const extra = x.descontado > 0 ? ' · desc. ' + fmtMonto(x.descontado) : '';
+      return '<div class="gasto-row"><span>' + x.cc + ' · ' + x.corte + ' · vence ' + x.vence + ' · ' + est + extra + '</span><span>' + fmtMonto(x.saldo) + '</span></div>';
+    }).join('');
+  } else {
+    html += '<div style="color:var(--muted); font-size:13px;">Sin cuentas abiertas.</div>';
+  }
+  box.innerHTML = html;
+
+  if (c.descuentosPendientes && c.descuentosPendientes.length){
+    const opts = c.cuentas.filter(x => x.estado !== 'Futura' || x.siguiente)
+      .map(x => '<option value="' + x.n + '">' + x.cc + ' · ' + x.corte + '</option>').join('');
+    pend.innerHTML = '<div style="font-size:12px; color:var(--muted); margin-bottom:4px;">Gastos del taller pendientes de descontar</div>' +
+      c.descuentosPendientes.map(g =>
+        '<div class="gasto-row" style="align-items:center; gap:8px;"><span style="flex:1">' + g.fecha + ' — ' + g.concepto + ' · ' + fmtMonto(g.total) + '</span>' +
+        '<select id="dc-' + g.fila + '" style="width:auto; padding:6px;">' + opts + '</select>' +
+        '<button class="secundario" style="width:auto; margin:0; padding:6px 10px;" onclick="marcarDescontado(' + g.fila + ')">Marcar descontado</button></div>'
+      ).join('') + '<div id="pendMsg"></div>';
+  } else {
+    pend.innerHTML = '';
+  }
+}
+
+async function marcarDescontado(fila){
+  const sel = document.getElementById('dc-' + fila);
+  const msg = document.getElementById('pendMsg');
+  msg.innerHTML = '<div class="msg">Guardando…</div>';
+  try {
+    const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'marcarDescontado', placa: placaActual, fila: fila, cuentaCobro: sel.value }) });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    await cargarResumen();
+    cargarGlobal();
+  } catch(err){
+    msg.innerHTML = '<div class="msg err">Error: ' + err.message + '</div>';
+  }
+}
+
+function poblarCuentasSelects(){
+  const c = carteraActual;
+  const selI = document.getElementById('ingresoCuenta');
+  const selD = document.getElementById('descuentoCuenta');
+  if (!c || !selI || !selD) return;
+  selI.innerHTML = '<option value="">— Sin cuenta de cobro (otro ingreso) —</option>';
+  c.cuentas.filter(x => x.saldo > 1 && (x.estado === 'Vencida' || x.estado === 'Vigente' || x.estado === 'Sin enviar')).forEach(x => {
+    const o = document.createElement('option');
+    o.value = x.n;
+    o.textContent = x.cc + ' · ' + x.corte + ' · saldo ' + fmtMonto(x.saldo) + ' (' + x.estado.toLowerCase() + ')';
+    selI.appendChild(o);
+  });
+  if (selI.options.length > 1) selI.selectedIndex = 1; // la cuenta abierta más antigua
+  selD.innerHTML = '';
+  c.cuentas.filter(x => x.estado !== 'Futura' || x.siguiente).forEach(x => {
+    const o = document.createElement('option');
+    o.value = x.n;
+    o.textContent = x.cc + ' · ' + x.corte;
+    selD.appendChild(o);
+  });
+  onIngresoCuentaChange();
+}
+
+function onIngresoCuentaChange(){
+  const n = document.getElementById('ingresoCuenta').value;
+  const tot = document.getElementById('total');
+  if (!n || !carteraActual || tot.value) return;
+  const x = carteraActual.cuentas.find(c => String(c.n) === n);
+  if (x) tot.placeholder = 'saldo ' + Math.round(x.saldo);
+}
+
+function onPagadoPorChange(){
+  const trans = document.getElementById('pagadoPor').value === 'Transpormax';
+  document.getElementById('descuentoBox').style.display = trans ? '' : 'none';
+  const desc = document.getElementById('descuentoEstado').value === 'Descontado';
+  document.getElementById('descuentoCuentaBox').style.display = (trans && desc) ? '' : 'none';
 }
 
 async function cargarAlertas(){
@@ -384,6 +559,10 @@ async function registrarMovimiento(){
       total: document.getElementById('total').value,
       kilometraje: document.getElementById('kilometraje').value || 'NA',
       detalle: document.getElementById('detalle').value,
+      pagadoPor: tipoActual === 'Egreso' ? document.getElementById('pagadoPor').value : '',
+      descuento: tipoActual === 'Egreso' && document.getElementById('pagadoPor').value === 'Transpormax' ? document.getElementById('descuentoEstado').value : '',
+      cuentaCobro: tipoActual === 'Ingreso' ? document.getElementById('ingresoCuenta').value
+        : (document.getElementById('pagadoPor').value === 'Transpormax' && document.getElementById('descuentoEstado').value === 'Descontado' ? document.getElementById('descuentoCuenta').value : ''),
       archivos: archivos
     };
 
@@ -396,7 +575,8 @@ async function registrarMovimiento(){
     document.getElementById('kilometraje').value = '';
     document.getElementById('detalle').value = '';
     document.getElementById('archivos').value = '';
-    cargarResumen();
+    await cargarResumen();
+    cargarGlobal();
   } catch(err){
     msgBox.innerHTML = '<div class="msg err">Error: ' + err.message + '</div>';
   } finally {

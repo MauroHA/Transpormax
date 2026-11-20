@@ -76,7 +76,7 @@
 
 <script>
 let API_URL = localStorage.getItem('tp_api_url_dash') || '';
-const PLACAS = ['PWK971', 'PWK970', 'PWL000'];
+const PLACAS = ['PWK971', 'PWK970'];
 let placaActual = null;
 let periodosSeleccionados = null; // null = mes actual (default); 'todos'; o array de claves 'YYYY-M'
 
@@ -210,12 +210,14 @@ async function cargarYRenderizar(){
 function renderResumen(d, alertas){
   const gastosHtml = (d.gastosMes && d.gastosMes.length)
     ? d.gastosMes.map(g => (
-        '<div class="gasto-row"><div class="izq"><span>' + g.concepto + '</span><span class="fecha">' + g.fecha + '</span></div>' +
+        '<div class="gasto-row"><div class="izq"><span>' + g.concepto + (g.pagadoPor === 'Transpormax' ? ' <small style="color:var(--muted)">(taller Transpormax · ' + (g.descuento === 'Descontado' ? 'descontado en ' + g.cuentaCobro : 'pendiente de descontar') + ')</small>' : '') + '</span><span class="fecha">' + g.fecha + '</span></div>' +
         '<div style="text-align:right">' + fmtMonto(g.total) +
         (g.soportes && g.soportes.length ? '<br>' + g.soportes.map((s,i) => '<a class="soporte-link" href="' + s + '" target="_blank">soporte ' + (i+1) + '</a>').join(' · ') : '') +
         '</div></div>'
       )).join('')
     : '<div style="color:var(--muted); font-size:13px;">Sin gastos operativos registrados este mes.</div>';
+  const subGastos = d.totalGastosDescTranspMes > 0
+    ? '<div style="font-size:12px; color:var(--muted); margin-bottom:6px;">Pagados directamente: ' + fmtMonto(d.totalGastosPagadosYoMes) + ' · Descontados por Transpormax: ' + fmtMonto(d.totalGastosDescTranspMes) + '</div>' : '';
 
   const pagosHtml = (d.pagosPropietarioMes && d.pagosPropietarioMes.length)
     ? d.pagosPropietarioMes.map(p => (
@@ -233,10 +235,20 @@ function renderResumen(d, alertas){
       ).join('') + '</table>'
     : '<div style="color:var(--muted); font-size:13px;">Aún no hay historial suficiente.</div>';
 
+  const ct = d.cartera ? d.cartera.totales : null;
+  const carteraHtml = ct
+    ? '<div style="font-size:13px; margin-bottom:8px;">Transpormax debe <b>' + fmtMonto(ct.meDebe) + '</b> · vencido <b>' + fmtMonto(ct.vencida) + '</b> · por vencer <b>' + fmtMonto(ct.vigente) + '</b>' +
+      (ct.descuentosPendientes > 0 ? '<br><span style="color:var(--muted)">Gastos de taller por descontar en próximos pagos: ' + fmtMonto(ct.descuentosPendientes) + ' (el próximo depósito estimado es ' + fmtMonto(ct.proximoPagoEstimado) + ')</span>' : '') + '</div>' +
+      (d.cartera.cuentas.filter(x => x.estado === 'Vencida' || x.estado === 'Vigente').map(x =>
+        '<div class="gasto-row"><div class="izq"><span>Cuenta ' + x.cc + ' · ' + x.corte + '</span><span class="fecha">vence ' + x.vence + (x.estado === 'Vencida' ? ' · vencida hace ' + x.diasAtraso + ' días' : '') + '</span></div>' +
+        '<div style="text-align:right">' + fmtMonto(x.saldo) + '</div></div>').join('') || '<div style="color:var(--muted); font-size:13px;">Sin cuentas pendientes.</div>')
+    : '';
+
   const alertaLineas = [];
   if (d.estadoCobro && d.estadoCobro.nosDeben) {
-    alertaLineas.push('<div class="cobro-alerta">⚠️ Cuenta de cobro pendiente de pago — corte ' + d.estadoCobro.detalle.corte +
-      ', ' + d.estadoCobro.detalle.diasAtraso + ' días de atraso (' + fmtMonto(d.estadoCobro.detalle.valor) + ')</div>');
+    const dv = d.estadoCobro.detalle;
+    alertaLineas.push('<div class="cobro-alerta">⚠️ Transpormax tiene ' + dv.cuentas + ' cuenta(s) de cobro vencida(s) por ' + fmtMonto(dv.valor) +
+      ' — la más antigua: ' + dv.corte + ' (' + dv.diasAtraso + ' días de atraso)</div>');
   }
   (alertas || []).forEach(a => {
     let texto;
@@ -263,10 +275,15 @@ function renderResumen(d, alertas){
         <div class="metric pos"><div class="num">${fmtMonto(d.utilidadMes)}</div><div class="lbl">Utilidad neta</div></div>
         <div class="metric pos"><div class="num">${fmtMonto(d.saldoPendiente)}</div><div class="lbl">Saldo pendiente por transferir</div></div>
       </div>
+      ${d.gastosTallerPorDescontar > 0 ? '<div style="font-size:12px; color:var(--muted); margin-top:8px;">El saldo no resta ' + fmtMonto(d.gastosTallerPorDescontar) + ' de gastos hechos en el taller de Transpormax: se reflejarán cuando Transpormax los descuente de sus pagos.</div>' : ''}
+    </div>
+    <div class="card">
+      <h2>Cartera con Transpormax</h2>
+      ${carteraHtml}
     </div>
     <div class="card">
       <h2>Gastos del mes (con soporte)</h2>
-      ${gastosHtml}
+      ${subGastos}${gastosHtml}
     </div>
     <div class="card">
       <h2>Pagos realizados este mes</h2>
